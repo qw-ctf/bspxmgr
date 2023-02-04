@@ -1,4 +1,4 @@
-module bspx
+module bspxmgr
 
 go 1.19
 

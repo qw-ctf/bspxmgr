@@ -1,0 +1,55 @@
+name: bspxmgr
+
+on: [push]
+
+jobs:
+  linux-and-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: "Build: Linux"
+        run: go build
+        env:
+          CGO_ENABLED: "0"
+
+      - name: "Build: Windows"
+        run: go build
+        env:
+          GOOS: "windows"
+          GOARCH: "386"
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: bspxmgr-linux
+          path: bspxmgr
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: bspxmgr-windows
+          path: bspxmgr.exe
+
+  macos:
+    runs-on: macos-12
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: "Build: macOS arm64"
+        run: go build -o bspxmgr-arm64
+        env:
+          GOOS: "darwin"
+          GOARCH: "arm64"
+
+      - name: "Build: macOS amd64"
+        run: go build -o bspxmgr-amd64
+        env:
+          GOOS: "darwin"
+          GOARCH: "amd64"
+
+      - name: "Universal binary"
+        run: lipo -create -output bspxmgr bspxmgr-arm64 bspxmgr-amd64
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: bspxmgr-macos-universal
+          path: bspxmgr
