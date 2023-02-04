@@ -177,7 +177,6 @@ func WriteBSPX(bspFile *BspFile, f *os.File, destName string, handler func(lumps
 		panic("Could not write new map")
 	}
 
-	// newLumpName string, payload string, destName string
 	bspx := map[[24]byte][]byte{}
 	for _, xlump := range bspFile.BspXLumps {
 		var buffer = make([]byte, xlump.Length)
@@ -254,8 +253,6 @@ var printCmd = &cobra.Command{
 		}
 
 		fmt.Println("")
-
-		//	WriteBSPX(&bspFile, f, "MVDSV_PHYSICSNORMALS", "/home/daniel/Quake2/qw/maps/monsoon.qpn", "/tmp/out.bsp")
 	},
 }
 
