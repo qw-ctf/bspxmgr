@@ -245,7 +245,7 @@ var printCmd = &cobra.Command{
 		}
 
 		if len(bspFile.BspXLumps) > 0 {
-			fmt.Println("   BSPX:")
+			fmt.Printf("   BSPX:                                  @ %8d ofs\n", bspFile.BspXOffset)
 
 			for _, xlump := range bspFile.BspXLumps {
 				fmt.Printf("     %-24s %8.1f kB @ %8d ofs\n", BytesToString(xlump.LumpName[:]), float64(xlump.Length)/1024, xlump.Offset)
