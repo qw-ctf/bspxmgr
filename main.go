@@ -5,10 +5,13 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
+	"unsafe"
 
 	"github.com/spf13/cobra"
 )
@@ -93,8 +96,8 @@ func (l LumpType) String() string {
 }
 
 type Lump struct {
-	Offset int32
-	Length int32
+	Offset uint32
+	Length uint32
 }
 
 type BspHeader struct {
@@ -109,8 +112,49 @@ type BspXHeader struct {
 
 type BspXLump struct {
 	LumpName [24]byte
-	Offset   int32
-	Length   int32
+	Offset   uint32
+	Length   uint32
+}
+
+type Face struct {
+	PlaneId   uint16
+	Side      uint16
+	LedgeId   uint32
+	LedgeNum  uint16
+	TexinfoId uint16
+	TypeLight uint8
+	BaseLight uint8
+	Light     [2]uint8
+	Lightmap  int32
+}
+
+type FaceV2 struct {
+	PlaneId   uint32
+	Side      uint32
+	LedgeId   uint32
+	LedgeNum  uint32
+	TexinfoId uint32
+	TypeLight uint8
+	BaseLight uint8
+	Light     [2]uint8
+	Lightmap  int32
+}
+
+type Vec4 [4]float32
+
+func (v Vec4) String() string {
+	return fmt.Sprintf("{x: %.3f, y: %.3f, z: %.3f, w: %.3f}", v[0], v[1], v[2], v[3])
+}
+
+type DecoupledLM struct {
+	LmWidth        uint16
+	LmHeight       uint16
+	Offset         int32
+	WorldToLmSpace [2]Vec4
+}
+
+func (d DecoupledLM) String() string {
+	return fmt.Sprintf("LM[w: %2d, h: %2d, off: %6d, [%s, %s]", d.LmWidth, d.LmHeight, d.Offset, d.WorldToLmSpace[0], d.WorldToLmSpace[1])
 }
 
 const BspXLumpHeaderSize = 24 + 4 + 4
@@ -200,8 +244,8 @@ func WriteBSPX(bspFile *BspFile, f *os.File, destName string, handler func(lumps
 	for lumpName, buffer := range bspx {
 		xlump := BspXLump{
 			LumpName: lumpName,
-			Offset:   int32(offset),
-			Length:   int32(len(buffer)),
+			Offset:   uint32(offset),
+			Length:   uint32(len(buffer)),
 		}
 		offset += int64(xlump.Length)
 		binary.Write(out, binary.LittleEndian, xlump)
@@ -222,37 +266,79 @@ func WriteBSPX(bspFile *BspFile, f *os.File, destName string, handler func(lumps
 	}
 }
 
+func PrintDecoupledLM(bspFile *BspFile, f *os.File) error {
+	var numFaces int
+	switch bspFile.BspHeader.Version {
+	case BspVersionStd:
+		numFaces = int(bspFile.BspHeader.Lumps[LumpFaces].Length / uint32(unsafe.Sizeof(Face{})))
+		break
+	case BspVersionBSP2:
+		numFaces = int(bspFile.BspHeader.Lumps[LumpFaces].Length / uint32(unsafe.Sizeof(FaceV2{})))
+		break
+	default:
+		fmt.Printf("Detailed print of BSP version %s not supported\n", bspFile.BspHeader.Version)
+		break
+	}
+	for i := 0; i < len(bspFile.BspXLumps); i++ {
+		if BytesToString(bspFile.BspXLumps[i].LumpName[:]) != "DECOUPLED_LM" {
+			continue
+		}
+		_, err := f.Seek(int64(bspFile.BspXLumps[i].Offset), io.SeekStart)
+		if err != nil {
+			return err
+		}
+		for j := 0; j < numFaces; j++ {
+			var Lightmap DecoupledLM
+			err := binary.Read(f, binary.LittleEndian, &Lightmap)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("%s\n", Lightmap)
+		}
+	}
+	return nil
+}
+
 var printCmd = &cobra.Command{
 	Use:   "print <map>",
 	Short: "Print BSP structure",
 	Long:  `Print the full list of both BSP and BSPX lumps`,
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.RangeArgs(1, 2),
 	Run: func(cmd *cobra.Command, args []string) {
-		f, err := os.Open(args[0])
+		f, err := os.Open(args[len(args)-1])
 		if err != nil {
 			panic(err)
 		}
 		defer f.Close()
 
+		fmt.Println(args[len(args)-1])
+
 		bspFile := ReadBspFile(f)
-
-		fmt.Println("Filename:", path.Base(args[0]))
-		fmt.Println(" Version:", bspFile.BspHeader.Version)
-		fmt.Println("   Lumps:")
-
-		for i, lump := range bspFile.BspHeader.Lumps {
-			fmt.Printf("     %-24s %8.1f kB @ %8d ofs\n", LumpType(i), float64(lump.Length)/1024.0, lump.Offset)
-		}
-
-		if len(bspFile.BspXLumps) > 0 {
-			fmt.Printf("  XLumps:                                 @ %8d ofs\n", bspFile.BspXOffset)
-
-			for _, xlump := range bspFile.BspXLumps {
-				fmt.Printf("     %-24s %8.1f kB @ %8d ofs\n", BytesToString(xlump.LumpName[:]), float64(xlump.Length)/1024, xlump.Offset)
+		if len(args) > 1 {
+			if args[0] == "DECOUPLED_LM" {
+				PrintDecoupledLM(&bspFile, f)
+			} else {
+				fmt.Printf("Detailed print of %s not supported\n", args[1])
 			}
-		}
+		} else {
+			fmt.Println("Filename:", path.Base(args[0]))
+			fmt.Println(" Version:", bspFile.BspHeader.Version)
+			fmt.Println("   Lumps:")
 
-		fmt.Println("")
+			for i, lump := range bspFile.BspHeader.Lumps {
+				fmt.Printf("     %-24s %8.1f kB @ %8d ofs\n", LumpType(i), float64(lump.Length)/1024.0, lump.Offset)
+			}
+
+			if len(bspFile.BspXLumps) > 0 {
+				fmt.Printf("  XLumps:                                 @ %8d ofs\n", bspFile.BspXOffset)
+
+				for _, xlump := range bspFile.BspXLumps {
+					fmt.Printf("     %-24s %8.1f kB @ %8d ofs\n", BytesToString(xlump.LumpName[:]), float64(xlump.Length)/1024, xlump.Offset)
+				}
+			}
+
+			fmt.Println("")
+		}
 	},
 }
 
@@ -305,10 +391,148 @@ var unsetLumpCmd = &cobra.Command{
 	},
 }
 
+var animSuffixCache = map[string]string{}
+
+func randomLetters(n int) string {
+	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
+
+func obfuscateTextureName(original string) string {
+	trimmed := strings.TrimRight(original, "\x00 ")
+
+	const totalLen = 15
+
+	//----------------------------------------------------------------
+	// 1) Animated textures: +0foo, +1foo, +2foo, +afoo, etc.
+	//----------------------------------------------------------------
+	if strings.HasPrefix(trimmed, "+") && len(trimmed) > 1 {
+		prefix := trimmed[:2]
+		suffix := trimmed[2:]
+
+		prefixLen := len(prefix)
+		suffixLen := totalLen - prefixLen
+
+		if suffixLen < 0 {
+			return prefix[:totalLen]
+		}
+
+		scrambledSuffix, found := animSuffixCache[suffix]
+		if !found {
+			scrambledSuffix = randomLetters(suffixLen)
+			animSuffixCache[suffix] = scrambledSuffix
+		} else {
+			if len(scrambledSuffix) != suffixLen {
+				scrambledSuffix = randomLetters(suffixLen)
+				animSuffixCache[suffix] = scrambledSuffix
+			}
+		}
+
+		return prefix + scrambledSuffix
+	}
+
+	liquidPrefixes := []string{"*water", "*lava", "*slime"}
+	for _, lp := range liquidPrefixes {
+		if strings.HasPrefix(trimmed, lp) {
+			return preserveAndScrambleFixed(lp, trimmed, totalLen)
+		}
+	}
+
+	if strings.HasPrefix(trimmed, "{") {
+		return preserveAndScrambleFixed("{", trimmed, totalLen)
+	}
+
+	if strings.HasPrefix(trimmed, "sky") {
+		return preserveAndScrambleFixed("sky", trimmed, totalLen)
+	}
+
+	return randomLetters(totalLen)
+}
+
+func preserveAndScrambleFixed(prefix, original string, totalLen int) string {
+	prefixLen := len(prefix)
+	if prefixLen >= totalLen {
+		return prefix[:totalLen]
+	}
+	scrambleLen := totalLen - prefixLen
+	return prefix + randomLetters(scrambleLen)
+}
+
+var obfuscateTextureNamesCmd = &cobra.Command{
+	Use:   "obfuscate <map>",
+	Short: "Randomizes texture names",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		f, err := os.Open(args[0])
+		if err != nil {
+			panic(err)
+		}
+		defer f.Close()
+
+		basename := strings.TrimSuffix(args[0], filepath.Ext(args[0]))
+		destname := fmt.Sprintf("%s.new.bsp", basename)
+
+		destFile, err := os.Create(destname)
+		if err != nil {
+			panic(err)
+		}
+		defer destFile.Close()
+
+		if _, err := io.Copy(destFile, f); err != nil {
+			panic(err)
+		}
+
+		if err := destFile.Sync(); err != nil {
+			panic(err)
+		}
+
+		rand.Seed(time.Now().UnixNano())
+
+		f.Seek(0, io.SeekStart)
+		bspFile := ReadBspFile(f)
+
+		f.Seek(int64(bspFile.BspHeader.Lumps[LumpTextures].Offset), io.SeekStart)
+		var numMips uint32
+		err = binary.Read(f, binary.LittleEndian, &numMips)
+		if err != nil {
+			panic(err)
+		}
+		var offsets = make([]uint32, numMips)
+		err = binary.Read(f, binary.LittleEndian, &offsets)
+		if err != nil {
+			panic(err)
+		}
+
+		for _, offset := range offsets {
+			f.Seek(int64(bspFile.BspHeader.Lumps[LumpTextures].Offset+offset), io.SeekStart)
+			var rawName [16]byte
+			err = binary.Read(f, binary.LittleEndian, &rawName)
+			if err != nil {
+				panic(err)
+			}
+			name := string(rawName[:])
+			obf := obfuscateTextureName(name)
+			fmt.Println(name + " => " + obf)
+
+			destFile.Seek(int64(bspFile.BspHeader.Lumps[LumpTextures].Offset+offset), io.SeekStart)
+			destFile.Write([]byte(obf))
+		}
+
+		err = destFile.Sync()
+		if err != nil {
+			panic(err)
+		}
+	},
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "bspxmgr",
-	Short: `bspxmgr manages BPSX assets.`,
-	Long:  `bspxmgr handles adding, removing, and updating BSPX assets.`,
+	Short: `bspxmgr manages BPS stuff.`,
+	Long:  `bspxmgr handles adding, removing, and updating BSPX assets, and obfuscates texture names.`,
 }
 
 func main() {
@@ -322,4 +546,5 @@ func init() {
 	rootCmd.AddCommand(printCmd)
 	rootCmd.AddCommand(setLumpCmd)
 	rootCmd.AddCommand(unsetLumpCmd)
+	rootCmd.AddCommand(obfuscateTextureNamesCmd)
 }
