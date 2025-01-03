@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"os"
 	"path"
@@ -492,34 +493,46 @@ var obfuscateTextureNamesCmd = &cobra.Command{
 
 		rand.Seed(time.Now().UnixNano())
 
-		f.Seek(0, io.SeekStart)
-		bspFile := ReadBspFile(f)
+		destFile.Seek(0, io.SeekStart)
+		bspFile := ReadBspFile(destFile)
 
-		f.Seek(int64(bspFile.BspHeader.Lumps[LumpTextures].Offset), io.SeekStart)
+		destFile.Seek(int64(bspFile.BspHeader.Lumps[LumpTextures].Offset), io.SeekStart)
 		var numMips uint32
-		err = binary.Read(f, binary.LittleEndian, &numMips)
+		err = binary.Read(destFile, binary.LittleEndian, &numMips)
 		if err != nil {
 			panic(err)
 		}
+		fmt.Println(numMips)
 		var offsets = make([]uint32, numMips)
-		err = binary.Read(f, binary.LittleEndian, &offsets)
+		err = binary.Read(destFile, binary.LittleEndian, &offsets)
 		if err != nil {
 			panic(err)
 		}
 
 		for _, offset := range offsets {
-			f.Seek(int64(bspFile.BspHeader.Lumps[LumpTextures].Offset+offset), io.SeekStart)
+			if offset == math.MaxUint32 {
+				continue
+			}
+			destFile.Seek(int64(bspFile.BspHeader.Lumps[LumpTextures].Offset+offset), io.SeekStart)
 			var rawName [16]byte
-			err = binary.Read(f, binary.LittleEndian, &rawName)
+			err = binary.Read(destFile, binary.LittleEndian, &rawName)
 			if err != nil {
 				panic(err)
 			}
+
 			name := string(rawName[:])
 			obf := obfuscateTextureName(name)
+
 			fmt.Println(name + " => " + obf)
 
+			var name16 [15]byte
+			copy(name16[:], obf) // copies up to 15 bytes
+
 			destFile.Seek(int64(bspFile.BspHeader.Lumps[LumpTextures].Offset+offset), io.SeekStart)
-			destFile.Write([]byte(obf))
+			err = binary.Write(destFile, binary.LittleEndian, name16)
+			if err != nil {
+				panic(err)
+			}
 		}
 
 		err = destFile.Sync()
