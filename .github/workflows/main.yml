@@ -9,6 +9,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
 
       - name: "Build: Linux"
         run: go build
@@ -37,6 +39,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
 
       - name: "Build: macOS arm64"
         run: go build -o bspxmgr-arm64
