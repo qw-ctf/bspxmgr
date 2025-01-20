@@ -436,7 +436,7 @@ func obfuscateTextureName(original string) string {
 		return prefix + scrambledSuffix
 	}
 
-	liquidPrefixes := []string{"*water", "*lava", "*slime"}
+	liquidPrefixes := []string{"*water", "*lava", "*slime", "*tele"}
 	for _, lp := range liquidPrefixes {
 		if strings.HasPrefix(trimmed, lp) {
 			return preserveAndScrambleFixed(lp, trimmed, totalLen)
