@@ -443,6 +443,10 @@ func obfuscateTextureName(original string) string {
 		}
 	}
 
+	if strings.HasPrefix(trimmed, "*") {
+		return preserveAndScrambleFixed("*", trimmed, totalLen)
+	}
+
 	if strings.HasPrefix(trimmed, "{") {
 		return preserveAndScrambleFixed("{", trimmed, totalLen)
 	}
